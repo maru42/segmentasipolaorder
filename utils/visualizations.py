@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
-PLOT_TEMPLATE = "plotly_white"
+PLOT_TEMPLATE = None
 
 
 def bar_chart(

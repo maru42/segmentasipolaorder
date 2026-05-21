@@ -15,7 +15,7 @@ Aplikasi web berbasis Python dan Streamlit untuk menganalisis pola permintaan la
 - Apriori menggunakan `mlxtend`: one hot encoding, frequent itemsets, dan association rules.
 - Filter interaktif berdasarkan tanggal, layanan, kategori waktu, pembayaran, lokasi asal gabungan, dan lokasi tujuan gabungan.
 - Visualisasi hasil Apriori: top rules, frequent itemset chart, network graph, dan confidence vs lift.
-- Desain dashboard putih yang bersih dan responsif.
+- Desain responsif yang mengikuti tema perangkat/browser, termasuk sidebar menu tanpa radio button.
 
 ## Struktur Folder
 

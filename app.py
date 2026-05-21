@@ -45,6 +45,7 @@ def initialize_state() -> None:
         "mapping": {},
         "preprocessing_done": False,
         "uploaded_file_name": None,
+        "active_section": "1. Upload Dataset",
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -52,27 +53,40 @@ def initialize_state() -> None:
 
 def render_sidebar() -> str:
     """Render sidebar navigation and return the selected dashboard section."""
+    sections = [
+        "1. Upload Dataset",
+        "2. Mapping Kolom",
+        "3. Preprocessing",
+        "4. Transformasi & Filter",
+        "5. Analisis Deskriptif",
+        "6. Analisis Pola Lanjutan",
+        "7. Apriori",
+        "8. Visualisasi Rules",
+    ]
+
+    if st.session_state.active_section not in sections:
+        st.session_state.active_section = sections[0]
+
     st.sidebar.title("Data Mining Ojek Online")
     st.sidebar.caption("Association Rule Mining dengan Apriori")
-    section = st.sidebar.radio(
-        "Navigasi",
-        [
-            "1. Upload Dataset",
-            "2. Mapping Kolom",
-            "3. Preprocessing",
-            "4. Transformasi & Filter",
-            "5. Analisis Deskriptif",
-            "6. Analisis Pola Lanjutan",
-            "7. Apriori",
-            "8. Visualisasi Rules",
-        ],
-        label_visibility="collapsed",
-    )
+
+    st.sidebar.markdown('<div class="sidebar-menu-title">Menu</div>', unsafe_allow_html=True)
+    for index, section_name in enumerate(sections):
+        is_active = st.session_state.active_section == section_name
+        if st.sidebar.button(
+            section_name,
+            key=f"sidebar_menu_{index}",
+            type="primary" if is_active else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state.active_section = section_name
+            st.rerun()
+
     st.sidebar.divider()
     st.sidebar.info(
         "Upload CSV/XLSX, pilih mapping kolom, lalu jalankan preprocessing dan Apriori."
     )
-    return section
+    return st.session_state.active_section
 
 
 def upload_section() -> None:

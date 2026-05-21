@@ -9,11 +9,12 @@ from utils.visualizations import PLOT_TEMPLATE, bar_chart, histogram, value_coun
 
 
 def inject_global_styles() -> None:
-    """Inject a compact light dashboard style."""
+    """Inject compact styles that follow the user's device color scheme."""
     st.markdown(
         """
         <style>
         :root {
+            color-scheme: light dark;
             --page: #f6f8fb;
             --panel: #ffffff;
             --panel-soft: #f8fafc;
@@ -22,13 +23,31 @@ def inject_global_styles() -> None:
             --accent: #0f766e;
             --accent-2: #2563eb;
             --line: rgba(15, 23, 42, 0.12);
+            --shadow: rgba(15, 23, 42, 0.05);
+            --button-bg: #ffffff;
+            --sidebar-bg: #ffffff;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --page: #0f172a;
+                --panel: #111827;
+                --panel-soft: #1f2937;
+                --text: #e5e7eb;
+                --muted: #94a3b8;
+                --accent: #2dd4bf;
+                --accent-2: #60a5fa;
+                --line: rgba(226, 232, 240, 0.16);
+                --shadow: rgba(0, 0, 0, 0.24);
+                --button-bg: #111827;
+                --sidebar-bg: #0b1120;
+            }
         }
         .stApp {
             background: var(--page);
             color: var(--text);
         }
         [data-testid="stSidebar"] {
-            background: #ffffff;
+            background: var(--sidebar-bg);
             border-right: 1px solid var(--line);
         }
         [data-testid="stMetric"] {
@@ -36,7 +55,7 @@ def inject_global_styles() -> None:
             border: 1px solid var(--line);
             border-radius: 8px;
             padding: 16px;
-            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+            box-shadow: 0 10px 24px var(--shadow);
         }
         [data-testid="stMetricLabel"] {
             color: var(--muted);
@@ -45,11 +64,31 @@ def inject_global_styles() -> None:
             border: 1px solid var(--line);
             border-radius: 8px;
         }
+        .sidebar-menu-title {
+            color: var(--muted);
+            font-size: 0.82rem;
+            font-weight: 700;
+            margin: 1rem 0 0.35rem;
+            text-transform: uppercase;
+        }
         div.stButton > button {
             border-radius: 8px;
             border: 1px solid var(--accent);
-            background: #ffffff;
+            background: var(--button-bg);
             color: var(--accent);
+        }
+        [data-testid="stSidebar"] div.stButton > button {
+            justify-content: flex-start;
+            border-color: transparent;
+            color: var(--text);
+            background: transparent;
+            box-shadow: none;
+            min-height: 2.45rem;
+        }
+        [data-testid="stSidebar"] div.stButton > button[kind="primary"] {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: color-mix(in srgb, var(--accent) 13%, transparent);
         }
         div.stButton > button:hover {
             border-color: var(--accent-2);
