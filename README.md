@@ -6,7 +6,8 @@ Aplikasi web berbasis Python dan Streamlit untuk menganalisis pola permintaan la
 
 - Upload dataset CSV/XLSX dari user.
 - Preview dataset, jumlah baris, jumlah kolom, missing values, tipe data, dan daftar nama kolom.
-- Mapping kolom dinamis melalui selectbox untuk waktu, tanggal, layanan, pembayaran, jarak, tarif, kecamatan asal, kota/kabupaten asal, kecamatan tujuan, kota/kabupaten tujuan, sub layanan, jumlah titik pengambilan, dan jumlah titik pengantaran.
+- Pemilihan kolom dinamis melalui multiselect. User bebas memilih kolom apa saja yang ingin dipakai untuk preprocessing, filter, visualisasi, dan Apriori.
+- Deteksi otomatis peran kolom seperti waktu, tanggal, layanan, pembayaran, jarak, tarif, lokasi, sub layanan, dan jumlah titik jika kolom tersebut dipilih.
 - Preprocessing otomatis: trim whitespace, normalisasi label kategori, hapus duplikasi, dan handle missing values.
 - Kategori waktu otomatis: Pagi, Siang, Sore, Malam, dan Dini Hari.
 - Analisis deskriptif dengan visualisasi Plotly.
@@ -69,4 +70,4 @@ streamlit run app.py
 
 ## Catatan Dataset
 
-Aplikasi ini tidak melakukan hardcode nama kolom dataset. Setelah upload, user memilih kolom yang sesuai melalui fitur mapping. Untuk lokasi, kecamatan dapat digabung dengan kota/kabupaten menjadi format seperti `Kebon Jeruk, Jakarta Barat`. Kolom yang tidak tersedia dapat dibiarkan sebagai `-- Tidak digunakan --`, tetapi hasil analisis akan lebih lengkap jika kolom-kolom utama dipetakan.
+Aplikasi ini tidak melakukan hardcode nama kolom dataset. Setelah upload, user memilih kolom apa saja yang ingin dipakai. Aplikasi lalu mendeteksi peran kolom secara otomatis. Untuk lokasi, kecamatan dapat digabung dengan kota/kabupaten menjadi format seperti `Kebon Jeruk, Jakarta Barat` jika kedua kolomnya ikut dipilih.

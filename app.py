@@ -5,7 +5,11 @@ import streamlit as st
 from utils.advanced_analysis import render_advanced_pattern_analysis
 from utils.apriori_utils import run_apriori
 from utils.data_loader import describe_dataset, load_uploaded_file
-from utils.mapping import MAPPING_FIELDS, build_column_mapping_ui, guess_column_mapping
+from utils.mapping import (
+    build_column_selection_ui,
+    default_selected_columns,
+    guess_column_mapping,
+)
 from utils.preprocessing import preprocess_dataset
 from utils.transactions import (
     apply_interactive_filters,
@@ -43,6 +47,7 @@ def initialize_state() -> None:
         "filtered_df": None,
         "apriori_result": None,
         "mapping": {},
+        "selected_columns": [],
         "preprocessing_done": False,
         "uploaded_file_name": None,
         "active_section": "1. Upload Dataset",
@@ -55,7 +60,7 @@ def render_sidebar() -> str:
     """Render sidebar navigation and return the selected dashboard section."""
     sections = [
         "1. Upload Dataset",
-        "2. Mapping Kolom",
+        "2. Pilih Kolom",
         "3. Preprocessing",
         "4. Transformasi & Filter",
         "5. Analisis Deskriptif",
@@ -84,7 +89,7 @@ def render_sidebar() -> str:
 
     st.sidebar.divider()
     st.sidebar.info(
-        "Upload CSV/XLSX, pilih mapping kolom, lalu jalankan preprocessing dan Apriori."
+        "Upload CSV/XLSX, pilih kolom yang ingin dipakai, lalu jalankan preprocessing dan Apriori."
     )
     return st.session_state.active_section
 
@@ -116,7 +121,8 @@ def upload_section() -> None:
         st.session_state.apriori_result = None
         st.session_state.preprocessing_done = False
         st.session_state.uploaded_file_name = uploaded_file.name
-        st.session_state.mapping = guess_column_mapping(df.columns)
+        st.session_state.selected_columns = default_selected_columns(df)
+        st.session_state.mapping = guess_column_mapping(st.session_state.selected_columns)
     else:
         st.session_state.raw_df = df
 
@@ -125,7 +131,7 @@ def upload_section() -> None:
 
 
 def mapping_section() -> None:
-    st.header("Column Mapping Dinamis")
+    st.header("Pemilihan Kolom Analisis")
     if st.session_state.raw_df is None:
         st.warning("Upload dataset terlebih dahulu.")
         return
@@ -133,22 +139,23 @@ def mapping_section() -> None:
     st.write("Daftar seluruh nama kolom pada dataset:")
     st.code(", ".join(map(str, st.session_state.raw_df.columns.tolist())))
 
-    guessed_mapping = st.session_state.mapping or guess_column_mapping(st.session_state.raw_df.columns)
+    current_selected = st.session_state.selected_columns or default_selected_columns(st.session_state.raw_df)
     old_mapping = st.session_state.mapping.copy()
-    mapping = build_column_mapping_ui(
-        st.session_state.raw_df,
-        guessed_mapping,
-        fields=MAPPING_FIELDS,
-    )
+    old_selected = list(current_selected)
+
+    selected_columns = build_column_selection_ui(st.session_state.raw_df, current_selected)
+    mapping = guess_column_mapping(selected_columns)
+
+    st.session_state.selected_columns = selected_columns
     st.session_state.mapping = mapping
-    if mapping != old_mapping:
+    if mapping != old_mapping or selected_columns != old_selected:
         st.session_state.processed_df = None
         st.session_state.enriched_df = None
         st.session_state.filtered_df = None
         st.session_state.apriori_result = None
         st.session_state.preprocessing_done = False
-        st.info("Mapping berubah. Jalankan preprocessing ulang agar hasil analisis memakai mapping terbaru.")
-    render_mapping_summary(mapping)
+        st.info("Pilihan kolom berubah. Jalankan preprocessing ulang agar hasil analisis memakai kolom terbaru.")
+    render_mapping_summary(mapping, selected_columns)
 
 
 def preprocessing_section() -> None:
@@ -157,14 +164,20 @@ def preprocessing_section() -> None:
         st.warning("Upload dataset terlebih dahulu.")
         return
 
+    if not st.session_state.selected_columns:
+        st.warning("Pilih minimal satu kolom di menu Mapping Kolom terlebih dahulu.")
+        return
+
     if not st.session_state.mapping:
-        st.session_state.mapping = guess_column_mapping(st.session_state.raw_df.columns)
+        st.session_state.mapping = guess_column_mapping(st.session_state.selected_columns)
+
+    source_df = st.session_state.raw_df[st.session_state.selected_columns].copy()
 
     with st.expander("Dataset sebelum preprocessing", expanded=True):
-        st.dataframe(st.session_state.raw_df, use_container_width=True, height=360)
+        st.dataframe(source_df, use_container_width=True, height=360)
 
     if st.button("Lakukan Preprocessing", type="primary", use_container_width=True):
-        processed_df = preprocess_dataset(st.session_state.raw_df, st.session_state.mapping)
+        processed_df = preprocess_dataset(source_df, st.session_state.mapping)
         st.session_state.processed_df = processed_df
         st.session_state.enriched_df = enrich_dataset(processed_df, st.session_state.mapping)
         st.session_state.filtered_df = None
@@ -190,7 +203,7 @@ def transform_filter_section() -> None:
 
     enriched_df = st.session_state.enriched_df
     st.subheader("Kategori Waktu Otomatis")
-    preview_cols = [
+    preview_candidates = [
         col
         for col in [
             "_kategori_waktu",
@@ -211,14 +224,18 @@ def transform_filter_section() -> None:
             st.session_state.mapping.get("jumlah_titik_pengantaran"),
             "_kategori_titik_pengambilan",
             "_kategori_titik_pengantaran",
-            "_kategori_multi_titik",
         ]
         if col and col in enriched_df.columns
     ]
+    preview_cols = list(dict.fromkeys(preview_candidates))
     st.dataframe(enriched_df[preview_cols].head(100), use_container_width=True, height=320)
 
     st.subheader("Transaksi Apriori")
-    transactions = build_apriori_transactions(enriched_df, st.session_state.mapping)
+    transactions = build_apriori_transactions(
+        enriched_df,
+        st.session_state.mapping,
+        st.session_state.selected_columns,
+    )
     st.caption(
         "Setiap baris transaksi dibentuk dari kategori waktu, layanan, pembayaran, asal, tujuan, "
         "kota/kabupaten asal-tujuan, dan sub layanan. Lokasi asal/tujuan memakai gabungan "
@@ -233,7 +250,11 @@ def transform_filter_section() -> None:
 
     st.subheader("Filter Interaktif")
     old_filtered_df = st.session_state.get("filtered_df")
-    filtered_df = apply_interactive_filters(enriched_df, st.session_state.mapping)
+    filtered_df = apply_interactive_filters(
+        enriched_df,
+        st.session_state.mapping,
+        st.session_state.selected_columns,
+    )
     st.session_state.filtered_df = filtered_df
     if old_filtered_df is not None and not filtered_df.equals(old_filtered_df):
         st.session_state.apriori_result = None
@@ -254,7 +275,7 @@ def descriptive_section() -> None:
     rules = apriori_result.rules if apriori_result is not None else None
     render_summary_cards(df, st.session_state.mapping, rules)
     st.divider()
-    render_descriptive_analysis(df, st.session_state.mapping)
+    render_descriptive_analysis(df, st.session_state.mapping, st.session_state.selected_columns)
 
 
 def apriori_section() -> None:
@@ -275,7 +296,11 @@ def apriori_section() -> None:
     with col3:
         min_lift = st.slider("Minimum Lift", 0.01, 10.0, 1.0, 0.05)
 
-    transactions = build_apriori_transactions(df, st.session_state.mapping)
+    transactions = build_apriori_transactions(
+        df,
+        st.session_state.mapping,
+        st.session_state.selected_columns,
+    )
     result = run_apriori(
         transactions,
         min_support=min_support,
@@ -341,7 +366,7 @@ def main() -> None:
 
     if section == "1. Upload Dataset":
         upload_section()
-    elif section == "2. Mapping Kolom":
+    elif section == "2. Pilih Kolom":
         mapping_section()
     elif section == "3. Preprocessing":
         preprocessing_section()

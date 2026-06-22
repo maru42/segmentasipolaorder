@@ -158,10 +158,40 @@ def guess_column_mapping(columns: Iterable[object]) -> dict[str, str | None]:
             mapping[city_regency_field] = None
 
     if mapping.get("sub_layanan") == mapping.get("layanan"):
+        mapping["sub_layanan"] = None
         for column, normalized_column in normalized_columns.items():
             if "sub" in normalized_column and "layanan" in normalized_column:
                 mapping["sub_layanan"] = column
                 break
+
+    directional_pairs = [
+        ("asal", "tujuan", ["asal", "origin", "pickup", "jemput"], ["tujuan", "destination", "dropoff", "antar"]),
+        (
+            "asal_kota_kabupaten",
+            "tujuan_kota_kabupaten",
+            ["asal", "origin", "pickup"],
+            ["tujuan", "destination", "dropoff"],
+        ),
+        (
+            "jumlah_titik_pengambilan",
+            "jumlah_titik_pengantaran",
+            ["pengambilan", "pickup", "penjemputan"],
+            ["pengantaran", "dropoff", "antar"],
+        ),
+    ]
+    for left_field, right_field, left_tokens, right_tokens in directional_pairs:
+        left_column = mapping.get(left_field)
+        right_column = mapping.get(right_field)
+        if not left_column or left_column != right_column:
+            continue
+
+        normalized_column = normalize_column_name(left_column)
+        has_left_token = any(token in normalized_column for token in left_tokens)
+        has_right_token = any(token in normalized_column for token in right_tokens)
+        if has_left_token and not has_right_token:
+            mapping[right_field] = None
+        elif has_right_token and not has_left_token:
+            mapping[left_field] = None
 
     return mapping
 
@@ -196,3 +226,37 @@ def build_column_mapping_ui(
         mapping[field_key] = None if selected == "-- Tidak digunakan --" else selected
 
     return mapping
+
+
+def default_selected_columns(df: pd.DataFrame) -> list[str]:
+    """Use every uploaded column by default so the user can remove what is not needed."""
+    return [str(column) for column in df.columns]
+
+
+def build_column_selection_ui(
+    df: pd.DataFrame,
+    selected_columns: list[str] | None,
+) -> list[str]:
+    """Render a flexible column picker instead of fixed semantic selectboxes."""
+    options = [str(column) for column in df.columns]
+    valid_defaults = [column for column in (selected_columns or options) if column in options]
+    if not valid_defaults:
+        valid_defaults = options
+
+    st.caption(
+        "Pilih kolom dataset yang ingin dipakai untuk preprocessing, filter, visualisasi, "
+        "dan Apriori. Peran kolom seperti waktu, lokasi, tarif, dan layanan akan dideteksi otomatis "
+        "dari kolom yang dipilih."
+    )
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        selected = st.multiselect(
+            "Kolom yang dipakai",
+            options,
+            default=valid_defaults,
+            help="Hanya kolom yang dipilih di sini yang digunakan pada proses berikutnya.",
+        )
+    with col2:
+        st.metric("Kolom dipilih", len(selected))
+
+    return selected

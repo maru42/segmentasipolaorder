@@ -14,9 +14,9 @@ st.markdown(
 
     1. Upload dataset CSV/XLSX dari menu utama.
     2. Periksa daftar kolom, jumlah baris, missing values, dan tipe data.
-    3. Buka section mapping kolom, lalu sesuaikan kolom waktu, tanggal, layanan,
-       pembayaran, jarak, tarif, kecamatan asal, kota/kabupaten asal,
-       kecamatan tujuan, kota/kabupaten tujuan, dan sub layanan.
+    3. Buka section Pilih Kolom, lalu pilih kolom apa saja yang ingin dipakai.
+       Aplikasi akan mendeteksi otomatis peran kolom seperti waktu, tanggal,
+       layanan, pembayaran, lokasi, tarif, jarak, sub layanan, dan jumlah titik.
     4. Jalankan preprocessing.
     5. Gunakan filter interaktif bila ingin menganalisis subset data.
     6. Atur minimum support, confidence, dan lift.
@@ -25,7 +25,7 @@ st.markdown(
        lokasi-layanan, pembayaran-layanan, grouped order, Ramadan 2026,
        tunai/non-tunai, dan pola historis pribadi.
 
-    Aplikasi tidak mengharuskan nama kolom tertentu. Semua proses memakai mapping
+    Aplikasi tidak mengharuskan nama kolom tertentu. Semua proses memakai kolom
     yang dipilih user setelah dataset diupload.
     """
 )

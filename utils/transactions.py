@@ -69,16 +69,6 @@ def _categorize_point_count(value: object, single_label: str, multi_label: str) 
     return multi_label if numeric > 1 else single_label
 
 
-def _categorize_multi_point(row: pd.Series) -> str:
-    pickup = pd.to_numeric(row.get("_jumlah_titik_pengambilan"), errors="coerce")
-    dropoff = pd.to_numeric(row.get("_jumlah_titik_pengantaran"), errors="coerce")
-    if pd.isna(pickup) and pd.isna(dropoff):
-        return "Tidak Diketahui"
-    if (not pd.isna(pickup) and pickup > 1) or (not pd.isna(dropoff) and dropoff > 1):
-        return "Multi Titik"
-    return "Single Titik"
-
-
 def _extract_hour(value: object) -> int | None:
     """Extract hour from flexible time/date strings or datetime-like values."""
     if pd.isna(value):
@@ -192,9 +182,6 @@ def enrich_dataset(df: pd.DataFrame, mapping: dict[str, str | None]) -> pd.DataF
             lambda value: _categorize_point_count(value, "Single Dropoff", "Multi Dropoff")
         )
 
-    if "_jumlah_titik_pengambilan" in result.columns or "_jumlah_titik_pengantaran" in result.columns:
-        result["_kategori_multi_titik"] = result.apply(_categorize_multi_point, axis=1)
-
     return result
 
 
@@ -212,47 +199,109 @@ def classify_ramadan_2026_period(value: object) -> str:
 def _clean_item(field_label: str, value: object) -> str | None:
     if pd.isna(value):
         return None
+    if hasattr(value, "strftime"):
+        value = value.strftime("%Y-%m-%d")
     text = str(value).strip()
     if not text or text.lower() in {"nan", "none", "nat"}:
         return None
     return f"{field_label}={text}"
 
 
+def _bin_numeric_series(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    if numeric.dropna().empty:
+        return pd.Series(["Tidak Diketahui"] * len(series), index=series.index)
+    if numeric.nunique(dropna=True) <= 10:
+        return numeric.fillna("Tidak Diketahui")
+
+    try:
+        binned = pd.qcut(
+            numeric,
+            q=3,
+            labels=["Rendah", "Sedang", "Tinggi"],
+            duplicates="drop",
+        )
+        return binned.astype("string").fillna("Tidak Diketahui")
+    except ValueError:
+        return numeric.fillna("Tidak Diketahui")
+
+
+def _transaction_sources_for_selected_columns(
+    df: pd.DataFrame,
+    mapping: dict[str, str | None],
+    selected_columns: list[str] | None,
+) -> list[tuple[str, str]]:
+    """Map user-selected raw columns into analysis-friendly transaction sources."""
+    if not selected_columns:
+        return [
+            ("Waktu", "_kategori_waktu"),
+            ("Layanan", _selected_column(mapping, "layanan") or ""),
+            ("Pembayaran", _selected_column(mapping, "pembayaran") or ""),
+            ("Asal", "_lokasi_asal" if "_lokasi_asal" in df.columns else (_selected_column(mapping, "asal") or "")),
+            ("Kota/Kab Asal", "_kota_kabupaten_asal"),
+            ("Tujuan", "_lokasi_tujuan" if "_lokasi_tujuan" in df.columns else (_selected_column(mapping, "tujuan") or "")),
+            ("Kota/Kab Tujuan", "_kota_kabupaten_tujuan"),
+            ("Sub Layanan", _selected_column(mapping, "sub_layanan") or ""),
+            ("Titik Pengambilan", "_kategori_titik_pengambilan"),
+            ("Titik Pengantaran", "_kategori_titik_pengantaran"),
+        ]
+
+    sources: list[tuple[str, str]] = []
+    for column in selected_columns:
+        if column not in df.columns:
+            continue
+
+        if column == mapping.get("waktu") and "_kategori_waktu" in df.columns:
+            sources.append(("Waktu", "_kategori_waktu"))
+        elif column == mapping.get("tanggal") and "_tanggal_filter" in df.columns:
+            sources.append(("Tanggal", "_tanggal_filter"))
+        elif column in {mapping.get("asal"), mapping.get("asal_kota_kabupaten")} and "_lokasi_asal" in df.columns:
+            sources.append(("Asal", "_lokasi_asal"))
+            if column == mapping.get("asal_kota_kabupaten") and "_kota_kabupaten_asal" in df.columns:
+                sources.append(("Kota/Kab Asal", "_kota_kabupaten_asal"))
+        elif column in {mapping.get("tujuan"), mapping.get("tujuan_kota_kabupaten")} and "_lokasi_tujuan" in df.columns:
+            sources.append(("Tujuan", "_lokasi_tujuan"))
+            if column == mapping.get("tujuan_kota_kabupaten") and "_kota_kabupaten_tujuan" in df.columns:
+                sources.append(("Kota/Kab Tujuan", "_kota_kabupaten_tujuan"))
+        elif column == mapping.get("jumlah_titik_pengambilan") and "_kategori_titik_pengambilan" in df.columns:
+            sources.append(("Titik Pengambilan", "_kategori_titik_pengambilan"))
+        elif column == mapping.get("jumlah_titik_pengantaran") and "_kategori_titik_pengantaran" in df.columns:
+            sources.append(("Titik Pengantaran", "_kategori_titik_pengantaran"))
+        else:
+            sources.append((column, column))
+
+    unique_sources: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for label, column in sources:
+        if not column or column not in df.columns or (label, column) in seen:
+            continue
+        seen.add((label, column))
+        unique_sources.append((label, column))
+    return unique_sources
+
+
 def build_apriori_transactions(
     df: pd.DataFrame,
     mapping: dict[str, str | None],
+    selected_columns: list[str] | None = None,
 ) -> pd.Series:
     """Create Apriori transaction item lists from mapped columns."""
-    item_sources: list[tuple[str, str | None]] = [
-        ("Waktu", "_kategori_waktu"),
-        ("Layanan", _selected_column(mapping, "layanan")),
-        ("Pembayaran", _selected_column(mapping, "pembayaran")),
-        ("Asal", "_lokasi_asal" if "_lokasi_asal" in df.columns else _selected_column(mapping, "asal")),
-        ("Kota/Kab Asal", "_kota_kabupaten_asal"),
-        ("Tujuan", "_lokasi_tujuan" if "_lokasi_tujuan" in df.columns else _selected_column(mapping, "tujuan")),
-        ("Kota/Kab Tujuan", "_kota_kabupaten_tujuan"),
-        ("Sub Layanan", _selected_column(mapping, "sub_layanan")),
-        ("Titik Pengambilan", "_kategori_titik_pengambilan"),
-        ("Titik Pengantaran", "_kategori_titik_pengantaran"),
-        ("Multi Titik", "_kategori_multi_titik"),
-    ]
-
-    seen_sources: set[str] = set()
-    unique_item_sources: list[tuple[str, str | None]] = []
-    for label, column in item_sources:
-        if not column or column in seen_sources:
-            continue
-        seen_sources.add(column)
-        unique_item_sources.append((label, column))
+    unique_item_sources = _transaction_sources_for_selected_columns(df, mapping, selected_columns)
+    source_values: dict[tuple[str, str], pd.Series] = {}
+    for label, column in unique_item_sources:
+        series = df[column]
+        if pd.api.types.is_numeric_dtype(series):
+            source_values[(label, column)] = _bin_numeric_series(series)
+        else:
+            source_values[(label, column)] = series
 
     transactions: list[list[str]] = []
-    for _, row in df.iterrows():
+    for row_index in range(len(df)):
         items: list[str] = []
         for label, column in unique_item_sources:
-            if column and column in df.columns:
-                item = _clean_item(label, row[column])
-                if item:
-                    items.append(item)
+            item = _clean_item(label, source_values[(label, column)].iloc[row_index])
+            if item:
+                items.append(item)
         transactions.append(items)
 
     return pd.Series(transactions, name="items_transaksi")
@@ -268,56 +317,120 @@ def _filter_multiselect(
     return st.multiselect(label, values, default=[], key=key)
 
 
-def apply_interactive_filters(df: pd.DataFrame, mapping: dict[str, str | None]) -> pd.DataFrame:
+def _filter_numeric_range(
+    label: str,
+    df: pd.DataFrame,
+    column: str,
+    key: str,
+) -> tuple[float, float] | None:
+    numeric = pd.to_numeric(df[column], errors="coerce").dropna()
+    if numeric.empty:
+        return None
+    min_value = float(numeric.min())
+    max_value = float(numeric.max())
+    if min_value == max_value:
+        st.caption(f"{label}: semua nilai {min_value:g}")
+        return None
+    return st.slider(
+        label,
+        min_value=min_value,
+        max_value=max_value,
+        value=(min_value, max_value),
+        key=key,
+    )
+
+
+def _filter_target_for_selected_column(
+    df: pd.DataFrame,
+    mapping: dict[str, str | None],
+    column: str,
+) -> tuple[str, str, str] | None:
+    if column not in df.columns:
+        return None
+    if column == mapping.get("waktu") and "_kategori_waktu" in df.columns:
+        return "_kategori_waktu", "Kategori waktu", "categorical"
+    if column == mapping.get("tanggal") and "_tanggal_filter" in df.columns:
+        return "_tanggal_filter", "Tanggal", "date"
+    if column in {mapping.get("asal"), mapping.get("asal_kota_kabupaten")} and "_lokasi_asal" in df.columns:
+        return "_lokasi_asal", "Lokasi asal", "categorical"
+    if column in {mapping.get("tujuan"), mapping.get("tujuan_kota_kabupaten")} and "_lokasi_tujuan" in df.columns:
+        return "_lokasi_tujuan", "Lokasi tujuan", "categorical"
+    if column == mapping.get("jumlah_titik_pengambilan") and "_kategori_titik_pengambilan" in df.columns:
+        return "_kategori_titik_pengambilan", "Titik pengambilan", "categorical"
+    if column == mapping.get("jumlah_titik_pengantaran") and "_kategori_titik_pengantaran" in df.columns:
+        return "_kategori_titik_pengantaran", "Titik pengantaran", "categorical"
+    if pd.api.types.is_numeric_dtype(df[column]):
+        return column, column, "numeric"
+    return column, column, "categorical"
+
+
+def apply_interactive_filters(
+    df: pd.DataFrame,
+    mapping: dict[str, str | None],
+    selected_columns: list[str] | None = None,
+) -> pd.DataFrame:
     """Render filters and return the filtered DataFrame."""
     result = df.copy()
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if "_tanggal_filter" in result.columns and result["_tanggal_filter"].notna().any():
-            min_date = result["_tanggal_filter"].dropna().min()
-            max_date = result["_tanggal_filter"].dropna().max()
-            selected_range = st.date_input(
-                "Tanggal",
-                value=(min_date, max_date),
-                min_value=min_date,
-                max_value=max_date,
-            )
-            if isinstance(selected_range, tuple) and len(selected_range) == 2:
-                start_date, end_date = selected_range
-                result = result[
-                    (result["_tanggal_filter"] >= start_date)
-                    & (result["_tanggal_filter"] <= end_date)
-                ]
-        else:
-            st.caption("Filter tanggal belum tersedia karena kolom tanggal tidak dipetakan.")
+    selected_columns = selected_columns or []
+    targets: list[tuple[str, str, str]] = []
+    for column in selected_columns:
+        target = _filter_target_for_selected_column(result, mapping, column)
+        if target:
+            targets.append(target)
 
-    with col2:
-        selected_time = _filter_multiselect(
-            "Kategori waktu", result, "_kategori_waktu", "filter_kategori_waktu"
-        )
-        if selected_time:
-            result = result[result["_kategori_waktu"].isin(selected_time)]
+    if not targets:
+        st.info("Belum ada kolom terpilih untuk difilter.")
+        return result
 
-    filter_columns = st.columns(2)
-    filter_fields = [
-        ("layanan", "Layanan"),
-        ("pembayaran", "Pembayaran"),
-        ("_lokasi_asal", "Asal"),
-        ("_lokasi_tujuan", "Tujuan"),
-        ("sub_layanan", "Sub layanan"),
-        ("_kategori_multi_titik", "Single/multi titik"),
-    ]
+    unique_targets: list[tuple[str, str, str]] = []
     seen_filter_columns: set[str] = set()
-    for index, (field, label) in enumerate(filter_fields):
-        column = field if field.startswith("_") else _selected_column(mapping, field)
-        if not column or column not in result.columns:
-            continue
-        if column in seen_filter_columns:
+    for column, label, filter_type in targets:
+        if column in seen_filter_columns or column not in result.columns:
             continue
         seen_filter_columns.add(column)
-        with filter_columns[index % 2]:
-            selected = _filter_multiselect(label, result, column, f"filter_{field}")
+        unique_targets.append((column, label, filter_type))
+
+    for start in range(0, len(unique_targets), 2):
+        filter_columns = st.columns(2)
+        for offset, (column, label, filter_type) in enumerate(unique_targets[start : start + 2]):
+            with filter_columns[offset]:
+                result = _apply_single_filter(result, column, label, filter_type)
+
+    return result
+
+
+def _apply_single_filter(
+    result: pd.DataFrame,
+    column: str,
+    label: str,
+    filter_type: str,
+) -> pd.DataFrame:
+    if filter_type == "date":
+        valid_dates = result[column].dropna()
+        if valid_dates.empty:
+            st.caption(f"{label} belum memiliki data tanggal valid.")
+            return result
+        min_date = valid_dates.min()
+        max_date = valid_dates.max()
+        selected_range = st.date_input(
+            label,
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date,
+            key=f"filter_{column}",
+        )
+        if isinstance(selected_range, tuple) and len(selected_range) == 2:
+            start_date, end_date = selected_range
+            result = result[(result[column] >= start_date) & (result[column] <= end_date)]
+    elif filter_type == "numeric":
+        selected_range = _filter_numeric_range(label, result, column, f"filter_{column}")
+        if selected_range is not None:
+            start_value, end_value = selected_range
+            numeric = pd.to_numeric(result[column], errors="coerce")
+            result = result[(numeric >= start_value) & (numeric <= end_value)]
+    else:
+        selected = _filter_multiselect(label, result, column, f"filter_{column}")
         if selected:
             result = result[result[column].isin(selected)]
 

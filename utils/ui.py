@@ -133,12 +133,45 @@ def render_dataset_overview(
         st.dataframe(description.dtypes, use_container_width=True, height=300)
 
 
-def render_mapping_summary(mapping: dict[str, str | None]) -> None:
-    st.subheader("Ringkasan Mapping Aktif")
-    summary = pd.DataFrame(
-        [{"konsep": field, "kolom_dataset": column or "-"} for field, column in mapping.items()]
-    )
-    st.dataframe(summary, use_container_width=True, hide_index=True)
+def render_mapping_summary(
+    mapping: dict[str, str | None],
+    selected_columns: list[str] | None = None,
+) -> None:
+    st.subheader("Ringkasan Kolom Aktif")
+    if selected_columns:
+        st.dataframe(
+            pd.DataFrame({"kolom_dipakai": selected_columns}),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.subheader("Peran Kolom Terdeteksi Otomatis")
+    detected_rows = [
+        {"peran": field, "kolom_dataset": column}
+        for field, column in mapping.items()
+        if column
+    ]
+    if detected_rows:
+        st.dataframe(pd.DataFrame(detected_rows), use_container_width=True, hide_index=True)
+    else:
+        st.caption("Belum ada peran khusus yang terdeteksi dari kolom pilihan.")
+
+    generic_columns = [
+        column
+        for column in (selected_columns or [])
+        if column not in {mapped_column for mapped_column in mapping.values() if mapped_column}
+    ]
+    if generic_columns:
+        st.subheader("Kolom Umum yang Tetap Dipakai")
+        st.caption(
+            "Kolom ini tidak punya peran khusus, tapi tetap dipakai untuk filter, "
+            "visualisasi otomatis, dan transaksi Apriori."
+        )
+        st.dataframe(
+            pd.DataFrame({"kolom_umum": generic_columns}),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 def _first_existing_column(df: pd.DataFrame, columns: list[str | None]) -> str | None:
@@ -207,6 +240,60 @@ def _render_count_chart(df: pd.DataFrame, column: str, title: str) -> None:
         st.info(f"Tidak ada data untuk {title.lower()}.")
         return
     st.plotly_chart(bar_chart(count_df, column, "jumlah", title), use_container_width=True)
+
+
+def _render_selected_column_chart(df: pd.DataFrame, column: str) -> None:
+    if column not in df.columns:
+        return
+
+    if pd.api.types.is_numeric_dtype(df[column]):
+        st.plotly_chart(histogram(df, column, f"Distribusi {column}"), use_container_width=True)
+        return
+
+    if pd.api.types.is_datetime64_any_dtype(df[column]):
+        date_counts = (
+            df[column]
+            .dropna()
+            .dt.date
+            .value_counts()
+            .sort_index()
+            .rename_axis("tanggal")
+            .reset_index(name="jumlah")
+        )
+        if date_counts.empty:
+            st.info(f"Tidak ada data tanggal valid untuk {column}.")
+            return
+        fig = px.line(
+            date_counts,
+            x="tanggal",
+            y="jumlah",
+            markers=True,
+            title=f"Tren {column}",
+            template=PLOT_TEMPLATE,
+        )
+        fig.update_layout(margin=dict(l=10, r=10, t=55, b=10))
+        st.plotly_chart(fig, use_container_width=True)
+        return
+
+    _render_count_chart(df, column, f"Jumlah Data per {column}")
+
+
+def render_selected_columns_analysis(df: pd.DataFrame, selected_columns: list[str] | None) -> None:
+    selected_columns = [column for column in (selected_columns or []) if column in df.columns]
+    if not selected_columns:
+        return
+
+    st.subheader("Analisis Kolom Terpilih")
+    st.caption("Visualisasi berikut dibuat otomatis berdasarkan tipe data setiap kolom yang dipilih.")
+    for first, second in zip(selected_columns[0::2], selected_columns[1::2]):
+        col1, col2 = st.columns(2)
+        with col1:
+            _render_selected_column_chart(df, first)
+        with col2:
+            _render_selected_column_chart(df, second)
+
+    if len(selected_columns) % 2 == 1:
+        _render_selected_column_chart(df, selected_columns[-1])
 
 
 def _top_label_and_count(series: pd.Series) -> tuple[str, int]:
@@ -374,8 +461,14 @@ def render_peak_demand_insights(df: pd.DataFrame, mapping: dict[str, str | None]
             st.plotly_chart(fig, use_container_width=True)
 
 
-def render_descriptive_analysis(df: pd.DataFrame, mapping: dict[str, str | None]) -> None:
+def render_descriptive_analysis(
+    df: pd.DataFrame,
+    mapping: dict[str, str | None],
+    selected_columns: list[str] | None = None,
+) -> None:
     render_peak_demand_insights(df, mapping)
+    st.divider()
+    render_selected_columns_analysis(df, selected_columns)
     st.divider()
 
     charts = [

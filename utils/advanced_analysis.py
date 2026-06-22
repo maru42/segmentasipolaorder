@@ -148,64 +148,88 @@ def derive_grouped_status(series: pd.Series) -> pd.Series:
     )
 
 
-def render_relationship_patterns(df: pd.DataFrame, mapping: dict[str, str | None]) -> None:
-    st.subheader("Pola Hubungan Antar Variabel")
-
+def render_relationship_patterns(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
     service_column = _selected_column(mapping, "layanan")
     sub_service_column = _selected_column(mapping, "sub_layanan")
     payment_column = _selected_column(mapping, "pembayaran")
     origin_column = _location_column(df, _selected_column(mapping, "asal"), "_lokasi_asal")
     destination_column = _location_column(df, _selected_column(mapping, "tujuan"), "_lokasi_tujuan")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if service_column and service_column in df.columns and "_kategori_waktu" in df.columns:
-            matrix = _safe_crosstab(df, "_kategori_waktu", service_column)
-            _render_heatmap(matrix, "Hubungan Kategori Waktu dan Jenis Layanan", "Layanan", "Kategori waktu")
-        else:
-            _missing_info("Hubungan waktu dan layanan", "waktu/layanan")
-
-    with col2:
-        if payment_column and payment_column in df.columns and service_column and service_column in df.columns:
-            matrix = _safe_crosstab(df, payment_column, service_column)
-            _render_heatmap(matrix, "Hubungan Pembayaran dan Layanan", "Layanan", "Pembayaran")
-        else:
-            _missing_info("Hubungan pembayaran dan layanan", "pembayaran/layanan")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if origin_column and origin_column in df.columns and service_column and service_column in df.columns:
-            matrix = _safe_crosstab(df, origin_column, service_column)
-            _render_heatmap(matrix, "Hubungan Lokasi Asal dan Layanan", "Layanan", "Lokasi asal")
-        else:
-            _missing_info("Hubungan lokasi asal dan layanan", "asal/layanan")
-
-    with col2:
-        if destination_column and destination_column in df.columns and service_column and service_column in df.columns:
-            matrix = _safe_crosstab(df, destination_column, service_column)
-            _render_heatmap(matrix, "Hubungan Lokasi Tujuan dan Layanan", "Layanan", "Lokasi tujuan")
-        else:
-            _missing_info("Hubungan lokasi tujuan dan layanan", "tujuan/layanan")
-
+    analyses: list[tuple[pd.DataFrame, str, str, str]] = []
+    if service_column and service_column in df.columns and "_kategori_waktu" in df.columns:
+        analyses.append(
+            (
+                _safe_crosstab(df, "_kategori_waktu", service_column),
+                "Hubungan Kategori Waktu dan Jenis Layanan",
+                "Layanan",
+                "Kategori waktu",
+            )
+        )
+    if payment_column and payment_column in df.columns and service_column and service_column in df.columns:
+        analyses.append(
+            (
+                _safe_crosstab(df, payment_column, service_column),
+                "Hubungan Pembayaran dan Layanan",
+                "Layanan",
+                "Pembayaran",
+            )
+        )
+    if origin_column and origin_column in df.columns and service_column and service_column in df.columns:
+        analyses.append(
+            (
+                _safe_crosstab(df, origin_column, service_column),
+                "Hubungan Lokasi Asal dan Layanan",
+                "Layanan",
+                "Lokasi asal",
+            )
+        )
+    if destination_column and destination_column in df.columns and service_column and service_column in df.columns:
+        analyses.append(
+            (
+                _safe_crosstab(df, destination_column, service_column),
+                "Hubungan Lokasi Tujuan dan Layanan",
+                "Layanan",
+                "Lokasi tujuan",
+            )
+        )
     if sub_service_column and sub_service_column in df.columns:
-        col1, col2 = st.columns(2)
-        with col1:
-            if "_kategori_waktu" in df.columns:
-                matrix = _safe_crosstab(df, "_kategori_waktu", sub_service_column)
-                _render_heatmap(matrix, "Hubungan Kategori Waktu dan Sub Layanan", "Sub layanan", "Kategori waktu")
-        with col2:
-            if payment_column and payment_column in df.columns:
-                matrix = _safe_crosstab(df, payment_column, sub_service_column)
-                _render_heatmap(matrix, "Hubungan Pembayaran dan Sub Layanan", "Sub layanan", "Pembayaran")
+        if "_kategori_waktu" in df.columns:
+            analyses.append(
+                (
+                    _safe_crosstab(df, "_kategori_waktu", sub_service_column),
+                    "Hubungan Kategori Waktu dan Sub Layanan",
+                    "Sub layanan",
+                    "Kategori waktu",
+                )
+            )
+        if payment_column and payment_column in df.columns:
+            analyses.append(
+                (
+                    _safe_crosstab(df, payment_column, sub_service_column),
+                    "Hubungan Pembayaran dan Sub Layanan",
+                    "Sub layanan",
+                    "Pembayaran",
+                )
+            )
+
+    if not analyses:
+        return False
+
+    st.subheader("Pola Hubungan Antar Variabel")
+    for start in range(0, len(analyses), 2):
+        columns = st.columns(2)
+        for offset, (matrix, title, x_title, y_title) in enumerate(analyses[start : start + 2]):
+            with columns[offset]:
+                _render_heatmap(matrix, title, x_title, y_title)
+    return True
 
 
-def render_grouped_order_analysis(df: pd.DataFrame, mapping: dict[str, str | None]) -> None:
-    st.subheader("Pola Grouped Order / Multi Order")
-
+def render_grouped_order_analysis(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
     group_column = _selected_column(mapping, "sub_layanan")
     if not group_column or group_column not in df.columns:
-        _missing_info("Analisis grouped/multi order", "sub layanan")
-        return
+        return False
+
+    st.subheader("Pola Grouped Order / Multi Order")
 
     data = df.copy()
     data["_status_grouped_order"] = derive_grouped_status(data[group_column])
@@ -233,19 +257,10 @@ def render_grouped_order_analysis(df: pd.DataFrame, mapping: dict[str, str | Non
             "Hubungan Kategori Waktu dengan Grouped Order",
         )
 
-    if "_kategori_multi_titik" in data.columns:
-        matrix = pd.crosstab(data["_status_grouped_order"], data["_kategori_multi_titik"])
-        _render_heatmap(
-            matrix,
-            "Validasi Grouped Order terhadap Single/Multi Titik",
-            "Kategori titik",
-            "Status grouped order",
-        )
+    return True
 
 
-def render_point_count_analysis(df: pd.DataFrame, mapping: dict[str, str | None]) -> None:
-    st.subheader("Pola Jumlah Titik Pengambilan dan Pengantaran")
-
+def render_point_count_analysis(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
     pickup_column = _selected_column(mapping, "jumlah_titik_pengambilan")
     dropoff_column = _selected_column(mapping, "jumlah_titik_pengantaran")
     sub_service_column = _selected_column(mapping, "sub_layanan")
@@ -253,28 +268,17 @@ def render_point_count_analysis(df: pd.DataFrame, mapping: dict[str, str | None]
     has_pickup = pickup_column and pickup_column in df.columns
     has_dropoff = dropoff_column and dropoff_column in df.columns
     if not has_pickup and not has_dropoff:
-        _missing_info("Analisis jumlah titik", "jumlah titik pengambilan/pengantaran")
-        return
+        return False
 
-    multi_point_counts = (
-        value_count_frame(df, "_kategori_multi_titik")
-        if "_kategori_multi_titik" in df.columns
-        else pd.DataFrame()
-    )
-    metric_cols = st.columns(4)
+    st.subheader("Pola Jumlah Titik Pengambilan dan Pengantaran")
+
+    metric_cols = st.columns(3)
     metric_cols[0].metric("Total transaksi", f"{len(df):,}".replace(",", "."))
-
-    if "_kategori_multi_titik" in df.columns:
-        multi_count = int((df["_kategori_multi_titik"] == "Multi Titik").sum())
-        multi_share = (multi_count / len(df) * 100) if len(df) else 0
-        metric_cols[1].metric("Multi titik", f"{multi_count:,}".replace(",", "."), f"{multi_share:.1f}%")
-    else:
-        metric_cols[1].metric("Multi titik", "Belum tersedia")
 
     avg_pickup = pd.to_numeric(df[pickup_column], errors="coerce").mean() if has_pickup else float("nan")
     avg_dropoff = pd.to_numeric(df[dropoff_column], errors="coerce").mean() if has_dropoff else float("nan")
-    metric_cols[2].metric("Rata-rata pickup", "-" if pd.isna(avg_pickup) else f"{avg_pickup:.2f}")
-    metric_cols[3].metric("Rata-rata dropoff", "-" if pd.isna(avg_dropoff) else f"{avg_dropoff:.2f}")
+    metric_cols[1].metric("Rata-rata pickup", "-" if pd.isna(avg_pickup) else f"{avg_pickup:.2f}")
+    metric_cols[2].metric("Rata-rata dropoff", "-" if pd.isna(avg_dropoff) else f"{avg_dropoff:.2f}")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -283,18 +287,6 @@ def render_point_count_analysis(df: pd.DataFrame, mapping: dict[str, str | None]
     with col2:
         if has_dropoff:
             _render_point_distribution(df, dropoff_column, "Distribusi Jumlah Titik Pengantaran")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if not multi_point_counts.empty:
-            st.plotly_chart(
-                bar_chart(multi_point_counts, "_kategori_multi_titik", "jumlah", "Single vs Multi Titik"),
-                use_container_width=True,
-            )
-    with col2:
-        if sub_service_column and sub_service_column in df.columns and "_kategori_multi_titik" in df.columns:
-            matrix = _safe_crosstab(df, sub_service_column, "_kategori_multi_titik", top_rows=15)
-            _render_heatmap(matrix, "Hubungan Sub Layanan dengan Single/Multi Titik", "Kategori titik", "Sub layanan")
 
     if sub_service_column and sub_service_column in df.columns:
         summary_fields = [sub_service_column]
@@ -317,20 +309,20 @@ def render_point_count_analysis(df: pd.DataFrame, mapping: dict[str, str | None]
             .reset_index()
         )
         st.dataframe(point_summary, use_container_width=True, hide_index=True)
+    return True
 
 
-def render_ramadan_comparison(df: pd.DataFrame, mapping: dict[str, str | None]) -> None:
+def render_ramadan_comparison(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
+    if "_periode_ramadan_2026" not in df.columns or "_tanggal_filter" not in df.columns:
+        return False
+
     st.subheader("Perbandingan Ramadan dan Pasca Ramadan 2026")
     st.caption("Ramadan 2026 didefinisikan sebagai 20 Februari 2026 sampai 21 Maret 2026.")
-
-    if "_periode_ramadan_2026" not in df.columns or "_tanggal_filter" not in df.columns:
-        _missing_info("Perbandingan Ramadan", "tanggal")
-        return
 
     compare_df = df[df["_periode_ramadan_2026"].isin(["Ramadan 2026", "Pasca Ramadan 2026"])].copy()
     if compare_df.empty:
         st.info("Tidak ada transaksi pada periode Ramadan 2026 atau pasca Ramadan 2026 di data yang sedang difilter.")
-        return
+        return True
 
     period_counts = value_count_frame(compare_df, "_periode_ramadan_2026")
     service_column = _selected_column(mapping, "layanan")
@@ -351,17 +343,17 @@ def render_ramadan_comparison(df: pd.DataFrame, mapping: dict[str, str | None]) 
             )
         else:
             _missing_info("Komposisi layanan Ramadan", "layanan")
+    return True
 
 
-def render_payment_tendency(df: pd.DataFrame, mapping: dict[str, str | None]) -> None:
-    st.subheader("Kecenderungan Transaksi Tunai dan NonTunai")
-
+def render_payment_tendency(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
     payment_column = _selected_column(mapping, "pembayaran")
     service_column = _selected_column(mapping, "layanan")
     sub_service_column = _selected_column(mapping, "sub_layanan")
     if not payment_column or payment_column not in df.columns:
-        _missing_info("Analisis tunai dan non-tunai", "pembayaran")
-        return
+        return False
+
+    st.subheader("Kecenderungan Transaksi Tunai dan NonTunai")
 
     data = df.copy()
     data["_kelompok_pembayaran"] = data[payment_column].map(normalize_payment_group)
@@ -391,11 +383,10 @@ def render_payment_tendency(df: pd.DataFrame, mapping: dict[str, str | None]) ->
             "_kelompok_pembayaran",
             "Hubungan Pembayaran Tunai/NonTunai dengan Sub Layanan",
         )
+    return True
 
 
-def render_personal_history_patterns(df: pd.DataFrame, mapping: dict[str, str | None]) -> None:
-    st.subheader("Karakteristik Pola Transaksi Historis Pribadi")
-
+def render_personal_history_patterns(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
     service_column = _selected_column(mapping, "layanan")
     sub_service_column = _selected_column(mapping, "sub_layanan")
     payment_column = _selected_column(mapping, "pembayaran")
@@ -418,8 +409,9 @@ def render_personal_history_patterns(df: pd.DataFrame, mapping: dict[str, str | 
     ]
 
     if not pattern_columns:
-        st.info("Pola historis belum tersedia karena kolom utama belum dipetakan.")
-        return
+        return False
+
+    st.subheader("Karakteristik Pola Transaksi Historis Pribadi")
 
     data = df.copy()
     data["_pola_transaksi"] = (
@@ -467,20 +459,26 @@ def render_personal_history_patterns(df: pd.DataFrame, mapping: dict[str, str | 
         metric_cols[1].metric("Rata-rata tarif", "-" if pd.isna(avg_tariff) else f"{avg_tariff:,.0f}")
         metric_cols[2].metric("Rata-rata jarak", "-" if pd.isna(avg_distance) else f"{avg_distance:,.2f}")
         st.dataframe(pattern_counts, use_container_width=True, hide_index=True)
+    return True
 
 
 def render_advanced_pattern_analysis(df: pd.DataFrame, mapping: dict[str, str | None]) -> None:
     st.caption(
-        "Analisis ini memakai hasil mapping kolom. Jika sebuah insight belum muncul, cek kembali mapping kolom yang relevan."
+        "Analisis ini memakai kolom yang dipilih dan peran kolom yang terdeteksi otomatis. "
+        "Jika sebuah insight belum muncul, pilih kolom yang relevan terlebih dahulu."
     )
-    render_relationship_patterns(df, mapping)
-    st.divider()
-    render_grouped_order_analysis(df, mapping)
-    st.divider()
-    render_point_count_analysis(df, mapping)
-    st.divider()
-    render_ramadan_comparison(df, mapping)
-    st.divider()
-    render_payment_tendency(df, mapping)
-    st.divider()
-    render_personal_history_patterns(df, mapping)
+    renderers = [
+        render_relationship_patterns,
+        render_grouped_order_analysis,
+        render_point_count_analysis,
+        render_ramadan_comparison,
+        render_payment_tendency,
+        render_personal_history_patterns,
+    ]
+    rendered_any = False
+    for renderer in renderers:
+        rendered = renderer(df, mapping)
+        rendered_any = rendered_any or rendered
+
+    if not rendered_any:
+        st.info("Belum ada analisis pola lanjutan yang cocok dengan kolom yang dipilih.")
