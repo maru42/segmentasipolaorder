@@ -8,6 +8,8 @@ import pandas as pd
 
 @dataclass
 class DatasetDescription:
+    """Dataset profile values used by the dashboard overview."""
+
     row_count: int
     column_count: int
     missing_values: pd.DataFrame
@@ -16,7 +18,7 @@ class DatasetDescription:
 
 
 def load_uploaded_file(uploaded_file: Any) -> pd.DataFrame:
-    """Load a user-uploaded CSV/XLSX file into a DataFrame."""
+    """Return a DataFrame loaded from the uploaded CSV/XLSX file."""
     file_name = uploaded_file.name.lower()
     if file_name.endswith(".csv"):
         return pd.read_csv(uploaded_file)
@@ -26,7 +28,7 @@ def load_uploaded_file(uploaded_file: Any) -> pd.DataFrame:
 
 
 def describe_dataset(df: pd.DataFrame) -> DatasetDescription:
-    """Create the dataset profile shown in the dashboard."""
+    """Return row, column, missing-value, dtype, and column-name metadata for a DataFrame."""
     missing = (
         df.isna()
         .sum()

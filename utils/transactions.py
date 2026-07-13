@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import re
 from datetime import date
-from typing import Iterable
 
 import pandas as pd
 import streamlit as st
 
 
-TIME_LABELS = ["Dini Hari", "Pagi", "Siang", "Sore", "Malam", "Tidak Diketahui"]
 RAMADAN_2026_START = date(2026, 2, 20)
 RAMADAN_2026_END = date(2026, 3, 21)
 
@@ -25,32 +23,6 @@ def _location_part(value: object) -> str | None:
     if not text or text.lower() in {"nan", "none", "nat", "tidak diketahui"}:
         return None
     return text
-
-
-def _build_combined_location(
-    df: pd.DataFrame,
-    district_column: str | None,
-    city_regency_column: str | None,
-) -> pd.Series | None:
-    """Combine kecamatan with kota/kabupaten without requiring both columns."""
-    available_columns = [
-        column for column in [district_column, city_regency_column] if column and column in df.columns
-    ]
-    if not available_columns:
-        return None
-
-    def combine(row: pd.Series) -> str:
-        district = _location_part(row[district_column]) if district_column in row.index else None
-        city_regency = (
-            _location_part(row[city_regency_column])
-            if city_regency_column in row.index
-            else None
-        )
-        if district and city_regency:
-            return f"{district}, {city_regency}"
-        return district or city_regency or "Tidak Diketahui"
-
-    return df[available_columns].apply(combine, axis=1)
 
 
 def _copy_location_level(
@@ -132,35 +104,19 @@ def enrich_dataset(df: pd.DataFrame, mapping: dict[str, str | None]) -> pd.DataF
 
     result["_periode_ramadan_2026"] = result["_tanggal_filter"].map(classify_ramadan_2026_period)
 
-    origin_location = _build_combined_location(
+    origin_location = _copy_location_level(
         result,
         _selected_column(mapping, "asal"),
-        _selected_column(mapping, "asal_kota_kabupaten"),
     )
     if origin_location is not None:
         result["_lokasi_asal"] = origin_location
 
-    origin_city_regency = _copy_location_level(
-        result,
-        _selected_column(mapping, "asal_kota_kabupaten"),
-    )
-    if origin_city_regency is not None:
-        result["_kota_kabupaten_asal"] = origin_city_regency
-
-    destination_location = _build_combined_location(
+    destination_location = _copy_location_level(
         result,
         _selected_column(mapping, "tujuan"),
-        _selected_column(mapping, "tujuan_kota_kabupaten"),
     )
     if destination_location is not None:
         result["_lokasi_tujuan"] = destination_location
-
-    destination_city_regency = _copy_location_level(
-        result,
-        _selected_column(mapping, "tujuan_kota_kabupaten"),
-    )
-    if destination_city_regency is not None:
-        result["_kota_kabupaten_tujuan"] = destination_city_regency
 
     pickup_points_column = _selected_column(mapping, "jumlah_titik_pengambilan")
     if pickup_points_column and pickup_points_column in result.columns:
@@ -238,10 +194,7 @@ def _transaction_sources_for_selected_columns(
             ("Layanan", _selected_column(mapping, "layanan") or ""),
             ("Pembayaran", _selected_column(mapping, "pembayaran") or ""),
             ("Asal", "_lokasi_asal" if "_lokasi_asal" in df.columns else (_selected_column(mapping, "asal") or "")),
-            ("Kota/Kab Asal", "_kota_kabupaten_asal"),
             ("Tujuan", "_lokasi_tujuan" if "_lokasi_tujuan" in df.columns else (_selected_column(mapping, "tujuan") or "")),
-            ("Kota/Kab Tujuan", "_kota_kabupaten_tujuan"),
-            ("Sub Layanan", _selected_column(mapping, "sub_layanan") or ""),
             ("Titik Pengambilan", "_kategori_titik_pengambilan"),
             ("Titik Pengantaran", "_kategori_titik_pengantaran"),
         ]
@@ -255,14 +208,10 @@ def _transaction_sources_for_selected_columns(
             sources.append(("Waktu", "_kategori_waktu"))
         elif column == mapping.get("tanggal") and "_tanggal_filter" in df.columns:
             sources.append(("Tanggal", "_tanggal_filter"))
-        elif column in {mapping.get("asal"), mapping.get("asal_kota_kabupaten")} and "_lokasi_asal" in df.columns:
+        elif column == mapping.get("asal") and "_lokasi_asal" in df.columns:
             sources.append(("Asal", "_lokasi_asal"))
-            if column == mapping.get("asal_kota_kabupaten") and "_kota_kabupaten_asal" in df.columns:
-                sources.append(("Kota/Kab Asal", "_kota_kabupaten_asal"))
-        elif column in {mapping.get("tujuan"), mapping.get("tujuan_kota_kabupaten")} and "_lokasi_tujuan" in df.columns:
+        elif column == mapping.get("tujuan") and "_lokasi_tujuan" in df.columns:
             sources.append(("Tujuan", "_lokasi_tujuan"))
-            if column == mapping.get("tujuan_kota_kabupaten") and "_kota_kabupaten_tujuan" in df.columns:
-                sources.append(("Kota/Kab Tujuan", "_kota_kabupaten_tujuan"))
         elif column == mapping.get("jumlah_titik_pengambilan") and "_kategori_titik_pengambilan" in df.columns:
             sources.append(("Titik Pengambilan", "_kategori_titik_pengambilan"))
         elif column == mapping.get("jumlah_titik_pengantaran") and "_kategori_titik_pengantaran" in df.columns:
@@ -351,9 +300,9 @@ def _filter_target_for_selected_column(
         return "_kategori_waktu", "Kategori waktu", "categorical"
     if column == mapping.get("tanggal") and "_tanggal_filter" in df.columns:
         return "_tanggal_filter", "Tanggal", "date"
-    if column in {mapping.get("asal"), mapping.get("asal_kota_kabupaten")} and "_lokasi_asal" in df.columns:
+    if column == mapping.get("asal") and "_lokasi_asal" in df.columns:
         return "_lokasi_asal", "Lokasi asal", "categorical"
-    if column in {mapping.get("tujuan"), mapping.get("tujuan_kota_kabupaten")} and "_lokasi_tujuan" in df.columns:
+    if column == mapping.get("tujuan") and "_lokasi_tujuan" in df.columns:
         return "_lokasi_tujuan", "Lokasi tujuan", "categorical"
     if column == mapping.get("jumlah_titik_pengambilan") and "_kategori_titik_pengambilan" in df.columns:
         return "_kategori_titik_pengambilan", "Titik pengambilan", "categorical"
@@ -435,8 +384,3 @@ def _apply_single_filter(
             result = result[result[column].isin(selected)]
 
     return result
-
-
-def flatten_itemsets(itemsets: Iterable[frozenset[str]]) -> list[str]:
-    """Convert mlxtend frozensets into sorted display strings."""
-    return [", ".join(sorted(itemset)) for itemset in itemsets]

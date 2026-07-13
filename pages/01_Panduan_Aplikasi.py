@@ -16,7 +16,7 @@ st.markdown(
     2. Periksa daftar kolom, jumlah baris, missing values, dan tipe data.
     3. Buka section Pilih Kolom, lalu pilih kolom apa saja yang ingin dipakai.
        Aplikasi akan mendeteksi otomatis peran kolom seperti waktu, tanggal,
-       layanan, pembayaran, lokasi, tarif, jarak, sub layanan, dan jumlah titik.
+       layanan, pembayaran, lokasi, tarif, jarak, dan jumlah titik.
     4. Jalankan preprocessing.
     5. Gunakan filter interaktif bila ingin menganalisis subset data.
     6. Atur minimum support, confidence, dan lift.

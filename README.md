@@ -7,14 +7,14 @@ Aplikasi web berbasis Python dan Streamlit untuk menganalisis pola permintaan la
 - Upload dataset CSV/XLSX dari user.
 - Preview dataset, jumlah baris, jumlah kolom, missing values, tipe data, dan daftar nama kolom.
 - Pemilihan kolom dinamis melalui multiselect. User bebas memilih kolom apa saja yang ingin dipakai untuk preprocessing, filter, visualisasi, dan Apriori.
-- Deteksi otomatis peran kolom seperti waktu, tanggal, layanan, pembayaran, jarak, tarif, lokasi, sub layanan, dan jumlah titik jika kolom tersebut dipilih.
+- Deteksi otomatis peran kolom seperti waktu, tanggal, layanan, pembayaran, jarak, tarif, lokasi, dan jumlah titik jika kolom tersebut dipilih.
 - Preprocessing otomatis: trim whitespace, normalisasi label kategori, hapus duplikasi, dan handle missing values.
 - Kategori waktu otomatis: Pagi, Siang, Sore, Malam, dan Dini Hari.
 - Analisis deskriptif dengan visualisasi Plotly.
-- Insight jam ramai, lokasi asal/tujuan ramai, rute tersibuk, dan heatmap jam x lokasi asal berbasis gabungan kecamatan dan kota/kabupaten.
-- Analisis pola lanjutan: waktu-layanan, waktu-sub layanan, lokasi-layanan, pembayaran-layanan, grouped order dari sub layanan, jumlah titik pengambilan/pengantaran, Ramadan vs pasca Ramadan 2026, tunai/non-tunai, dan pola historis pribadi.
+- Insight jam ramai, lokasi asal/tujuan ramai, rute tersibuk, dan heatmap jam x lokasi asal berbasis kecamatan.
+- Analisis pola lanjutan: waktu-layanan, lokasi-layanan, pembayaran-layanan, grouped order dari layanan, jumlah titik pengambilan/pengantaran, Ramadan vs pasca Ramadan 2026, tunai/non-tunai, dan pola historis pribadi.
 - Apriori menggunakan `mlxtend`: one hot encoding, frequent itemsets, dan association rules.
-- Filter interaktif berdasarkan tanggal, layanan, kategori waktu, pembayaran, lokasi asal gabungan, dan lokasi tujuan gabungan.
+- Filter interaktif berdasarkan tanggal, layanan, kategori waktu, pembayaran, lokasi asal, dan lokasi tujuan.
 - Visualisasi hasil Apriori: top rules, frequent itemset chart, network graph, dan confidence vs lift.
 - Desain responsif yang mengikuti tema perangkat/browser, termasuk sidebar menu tanpa radio button.
 
@@ -70,4 +70,4 @@ streamlit run app.py
 
 ## Catatan Dataset
 
-Aplikasi ini tidak melakukan hardcode nama kolom dataset. Setelah upload, user memilih kolom apa saja yang ingin dipakai. Aplikasi lalu mendeteksi peran kolom secara otomatis. Untuk lokasi, kecamatan dapat digabung dengan kota/kabupaten menjadi format seperti `Kebon Jeruk, Jakarta Barat` jika kedua kolomnya ikut dipilih.
+Aplikasi ini tidak melakukan hardcode nama kolom dataset. Setelah upload, user memilih kolom apa saja yang ingin dipakai. Aplikasi lalu mendeteksi peran kolom secara otomatis. Untuk lokasi, aplikasi memakai kolom kecamatan asal dan tujuan yang dipilih user.

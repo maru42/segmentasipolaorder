@@ -28,10 +28,7 @@ CATEGORICAL_FIELDS = {
     "layanan",
     "pembayaran",
     "asal",
-    "asal_kota_kabupaten",
     "tujuan",
-    "tujuan_kota_kabupaten",
-    "sub_layanan",
 }
 NUMERIC_FIELDS = {"jarak", "tarif", "jumlah_titik_pengambilan", "jumlah_titik_pengantaran"}
 

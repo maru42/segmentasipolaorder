@@ -5,7 +5,16 @@ import plotly.express as px
 import streamlit as st
 
 from utils.data_loader import DatasetDescription
+from utils.mapping import format_column_label, friendly_column_config
 from utils.visualizations import PLOT_TEMPLATE, bar_chart, histogram, value_count_frame
+
+
+DEFAULT_TABLE_HEIGHT = 360
+DETAIL_TABLE_HEIGHT = 300
+TOP_ROUTE_LIMIT = 15
+TOP_BUSY_ORIGIN_LIMIT = 10
+BEST_RULE_MAX_CHARS = 52
+ROUTE_METRIC_MAX_CHARS = 42
 
 
 def inject_global_styles() -> None:
@@ -112,6 +121,7 @@ def render_dataset_overview(
     description: DatasetDescription,
     title: str = "Ringkasan Dataset",
 ) -> None:
+    """Render dataset metadata and previews for the provided DataFrame."""
     st.subheader(title)
     col1, col2, col3 = st.columns(3)
     col1.metric("Jumlah baris", f"{description.row_count:,}".replace(",", "."))
@@ -119,7 +129,7 @@ def render_dataset_overview(
     col3.metric("Total missing values", f"{int(df.isna().sum().sum()):,}".replace(",", "."))
 
     st.subheader("Preview Dataset")
-    st.dataframe(df, use_container_width=True, height=360)
+    st.dataframe(df, use_container_width=True, height=DEFAULT_TABLE_HEIGHT)
 
     st.subheader("Daftar Nama Kolom")
     st.dataframe(pd.DataFrame({"nama_kolom": description.columns}), use_container_width=True)
@@ -127,16 +137,17 @@ def render_dataset_overview(
     col_left, col_right = st.columns(2)
     with col_left:
         st.subheader("Missing Values")
-        st.dataframe(description.missing_values, use_container_width=True, height=300)
+        st.dataframe(description.missing_values, use_container_width=True, height=DETAIL_TABLE_HEIGHT)
     with col_right:
         st.subheader("Tipe Data")
-        st.dataframe(description.dtypes, use_container_width=True, height=300)
+        st.dataframe(description.dtypes, use_container_width=True, height=DETAIL_TABLE_HEIGHT)
 
 
 def render_mapping_summary(
     mapping: dict[str, str | None],
     selected_columns: list[str] | None = None,
 ) -> None:
+    """Render active selected columns and automatically detected semantic roles."""
     st.subheader("Ringkasan Kolom Aktif")
     if selected_columns:
         st.dataframe(
@@ -147,12 +158,18 @@ def render_mapping_summary(
 
     st.subheader("Peran Kolom Terdeteksi Otomatis")
     detected_rows = [
-        {"peran": field, "kolom_dataset": column}
+        {"peran": format_column_label(field), "kolom_dataset": column}
         for field, column in mapping.items()
         if column
     ]
     if detected_rows:
-        st.dataframe(pd.DataFrame(detected_rows), use_container_width=True, hide_index=True)
+        mapping_df = pd.DataFrame(detected_rows)
+        st.dataframe(
+            mapping_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config=friendly_column_config(mapping_df),
+        )
     else:
         st.caption("Belum ada peran khusus yang terdeteksi dari kolom pilihan.")
 
@@ -171,6 +188,7 @@ def render_mapping_summary(
             pd.DataFrame({"kolom_umum": generic_columns}),
             use_container_width=True,
             hide_index=True,
+            column_config=friendly_column_config(pd.DataFrame({"kolom_umum": generic_columns})),
         )
 
 
@@ -192,6 +210,7 @@ def render_summary_cards(
     mapping: dict[str, str | None],
     rules: pd.DataFrame | None = None,
 ) -> None:
+    """Render transaction summary metrics using the current DataFrame, mapping, and rules."""
     tariff_column = _first_existing_column(df, [mapping.get("tarif")])
     distance_column = _first_existing_column(df, [mapping.get("jarak")])
     service_column = _first_existing_column(df, [mapping.get("layanan")])
@@ -223,7 +242,19 @@ def render_summary_cards(
     col2.metric("Rata-rata tarif", "-" if pd.isna(avg_tariff) else f"{avg_tariff:,.0f}")
     col3.metric("Rata-rata jarak", "-" if pd.isna(avg_distance) else f"{avg_distance:,.2f}")
     col4.metric("Layanan terbanyak", top_service)
-    col5.metric("Rule terbaik", best_rule[:52] + ("..." if len(best_rule) > 52 else ""))
+    rule_preview = best_rule[:BEST_RULE_MAX_CHARS] + (
+        "..." if len(best_rule) > BEST_RULE_MAX_CHARS else ""
+    )
+    col5.metric("Rule terbaik", rule_preview)
+    if len(best_rule) > BEST_RULE_MAX_CHARS:
+        with col5.popover("Lihat rule lengkap", use_container_width=True):
+            st.text_area(
+                "Rule lengkap",
+                best_rule,
+                height=140,
+                disabled=True,
+                label_visibility="collapsed",
+            )
 
 
 def render_rule_summary(
@@ -231,6 +262,7 @@ def render_rule_summary(
     mapping: dict[str, str | None],
     rules: pd.DataFrame,
 ) -> None:
+    """Render summary metrics that include the current association-rule result."""
     render_summary_cards(df, mapping, rules)
 
 
@@ -270,6 +302,10 @@ def _render_selected_column_chart(df: pd.DataFrame, column: str) -> None:
             markers=True,
             title=f"Tren {column}",
             template=PLOT_TEMPLATE,
+            labels={
+                "tanggal": "Tanggal",
+                "jumlah": "Jumlah",
+            },
         )
         fig.update_layout(margin=dict(l=10, r=10, t=55, b=10))
         st.plotly_chart(fig, use_container_width=True)
@@ -279,6 +315,7 @@ def _render_selected_column_chart(df: pd.DataFrame, column: str) -> None:
 
 
 def render_selected_columns_analysis(df: pd.DataFrame, selected_columns: list[str] | None) -> None:
+    """Render automatic charts for the active selected columns in a DataFrame."""
     selected_columns = [column for column in (selected_columns or []) if column in df.columns]
     if not selected_columns:
         return
@@ -326,7 +363,7 @@ def _route_count_frame(
     df: pd.DataFrame,
     origin_column: str | None,
     destination_column: str | None,
-    top_n: int = 15,
+    top_n: int = TOP_ROUTE_LIMIT,
 ) -> pd.DataFrame:
     if not origin_column or not destination_column:
         return pd.DataFrame(columns=["rute", "jumlah"])
@@ -389,7 +426,11 @@ def render_peak_demand_insights(df: pd.DataFrame, mapping: dict[str, str | None]
     metric_cols[1].metric("Waktu tersibuk", peak_time_label, f"{peak_time_count} order")
     metric_cols[2].metric("Asal tersibuk", peak_origin_label, f"{peak_origin_count} order")
     metric_cols[3].metric("Tujuan tersibuk", peak_destination_label, f"{peak_destination_count} order")
-    metric_cols[4].metric("Rute tersibuk", peak_route_label[:42], f"{peak_route_count} order")
+    metric_cols[4].metric(
+        "Rute tersibuk",
+        peak_route_label[:ROUTE_METRIC_MAX_CHARS],
+        f"{peak_route_count} order",
+    )
 
     col1, col2 = st.columns(2)
     with col1:
@@ -404,6 +445,10 @@ def render_peak_demand_insights(df: pd.DataFrame, mapping: dict[str, str | None]
                 template=PLOT_TEMPLATE,
                 color="jumlah",
                 color_continuous_scale="Teal",
+                labels={
+                    "jam_label": "Jam",
+                    "jumlah": "Jumlah",
+                },
             )
             fig.update_layout(
                 xaxis_title="Jam",
@@ -426,6 +471,10 @@ def render_peak_demand_insights(df: pd.DataFrame, mapping: dict[str, str | None]
                 template=PLOT_TEMPLATE,
                 color="jumlah",
                 color_continuous_scale="Blues",
+                labels={
+                    "jumlah": "Jumlah",
+                    "rute": "Rute",
+                },
             )
             fig.update_layout(
                 xaxis_title="Jumlah order",
@@ -445,7 +494,13 @@ def render_peak_demand_insights(df: pd.DataFrame, mapping: dict[str, str | None]
         heatmap_df["_jam_order"] = pd.to_numeric(heatmap_df["_jam_order"], errors="coerce")
         heatmap_df = heatmap_df.dropna(subset=[origin_column, "_jam_order"])
         if not heatmap_df.empty:
-            top_origins = heatmap_df[origin_column].astype(str).value_counts().head(10).index
+            top_origins = (
+                heatmap_df[origin_column]
+                .astype(str)
+                .value_counts()
+                .head(TOP_BUSY_ORIGIN_LIMIT)
+                .index
+            )
             heatmap_df = heatmap_df[heatmap_df[origin_column].astype(str).isin(top_origins)]
             heatmap_df["jam_label"] = heatmap_df["_jam_order"].astype(int).map(lambda hour: f"{hour:02d}:00")
             pivot = pd.crosstab(heatmap_df[origin_column].astype(str), heatmap_df["jam_label"])
@@ -466,6 +521,7 @@ def render_descriptive_analysis(
     mapping: dict[str, str | None],
     selected_columns: list[str] | None = None,
 ) -> None:
+    """Render descriptive charts for the current DataFrame and detected column mapping."""
     render_peak_demand_insights(df, mapping)
     st.divider()
     render_selected_columns_analysis(df, selected_columns)
@@ -475,8 +531,6 @@ def render_descriptive_analysis(
         ("_kategori_waktu", "Jumlah Order per Kategori Waktu"),
         (mapping.get("layanan"), "Jumlah Order per Layanan"),
         (mapping.get("pembayaran"), "Pembayaran Terbanyak"),
-        (_location_column(df, mapping.get("asal"), "_lokasi_asal"), "Lokasi Asal Terbanyak"),
-        (_location_column(df, mapping.get("tujuan"), "_lokasi_tujuan"), "Lokasi Tujuan Terbanyak"),
     ]
 
     for first, second in zip(charts[0::2], charts[1::2]):

@@ -2,25 +2,35 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from difflib import SequenceMatcher
+import re
 
 import pandas as pd
 import streamlit as st
 
 
-MAPPING_FIELDS: dict[str, str] = {
-    "waktu": "Kolom waktu",
-    "tanggal": "Kolom tanggal",
-    "layanan": "Kolom layanan",
-    "pembayaran": "Kolom pembayaran",
-    "jarak": "Kolom jarak",
-    "tarif": "Kolom tarif",
-    "asal": "Kolom kecamatan asal",
-    "asal_kota_kabupaten": "Kolom kota/kabupaten asal (opsional)",
-    "tujuan": "Kolom kecamatan tujuan",
-    "tujuan_kota_kabupaten": "Kolom kota/kabupaten tujuan (opsional)",
-    "sub_layanan": "Kolom sub layanan",
-    "jumlah_titik_pengambilan": "Kolom jumlah titik pengambilan (opsional)",
-    "jumlah_titik_pengantaran": "Kolom jumlah titik pengantaran (opsional)",
+COLUMN_MAPPING_THRESHOLD = 0.55
+FRIENDLY_COLUMN_LABELS = {
+    "_jam_order": "Jam Order",
+    "_kategori_waktu": "Kategori Waktu",
+    "_tanggal_filter": "Tanggal Filter",
+    "_periode_ramadan_2026": "Periode Ramadan 2026",
+    "_lokasi_asal": "Lokasi Asal",
+    "_lokasi_tujuan": "Lokasi Tujuan",
+    "_jumlah_titik_pengambilan": "Jumlah Titik\nPengambilan",
+    "_jumlah_titik_pengantaran": "Jumlah Titik\nPengantaran",
+    "_kategori_titik_pengambilan": "Kategori Titik\nPengambilan",
+    "_kategori_titik_pengantaran": "Kategori Titik\nPengantaran",
+    "_status_grouped_order": "Status Grouped Order",
+    "_kelompok_pembayaran": "Kelompok Pembayaran",
+    "_pola_transaksi": "Pola Transaksi",
+    "items_transaksi": "Items Transaksi",
+    "jumlah_titik": "Jumlah Titik",
+    "jumlah_order": "Jumlah Order",
+    "jumlah_transaksi": "Jumlah Transaksi",
+    "rata_rata_titik_pengambilan": "Rata-rata Titik\nPengambilan",
+    "rata_rata_titik_pengantaran": "Rata-rata Titik\nPengantaran",
+    "maks_titik_pengambilan": "Maks Titik\nPengambilan",
+    "maks_titik_pengantaran": "Maks Titik\nPengantaran",
 }
 
 
@@ -40,16 +50,6 @@ FIELD_KEYWORDS: dict[str, list[str]] = {
         "kecamatan pickup",
         "kecamatan jemput",
     ],
-    "asal_kota_kabupaten": [
-        "kota_asal",
-        "kabupaten_asal",
-        "kota kabupaten asal",
-        "asal_kota",
-        "asal_kabupaten",
-        "origin_city",
-        "origin_regency",
-        "pickup_city",
-    ],
     "tujuan": [
         "tujuan",
         "kecamatan_tujuan",
@@ -58,31 +58,6 @@ FIELD_KEYWORDS: dict[str, list[str]] = {
         "dropoff_district",
         "kecamatan tujuan",
         "kecamatan antar",
-    ],
-    "tujuan_kota_kabupaten": [
-        "kota_tujuan",
-        "kabupaten_tujuan",
-        "kota kabupaten tujuan",
-        "tujuan_kota",
-        "tujuan_kabupaten",
-        "destination_city",
-        "destination_regency",
-        "dropoff_city",
-    ],
-    "sub_layanan": [
-        "sub_layanan",
-        "sub layanan",
-        "sub_kategori_layanan",
-        "sub kategori layanan",
-        "sub kategori",
-        "sublayanan",
-        "sub_service",
-        "subservice",
-        "detail_layanan",
-        "layanan_detail",
-        "tipe_layanan",
-        "jenis_layanan",
-        "service_type",
     ],
     "jumlah_titik_pengambilan": [
         "jumlah_titik_pengambilan",
@@ -106,7 +81,7 @@ FIELD_KEYWORDS: dict[str, list[str]] = {
 
 
 def normalize_column_name(name: object) -> str:
-    """Normalize a column name only for similarity checks."""
+    """Return a normalized column name for keyword similarity checks."""
     return (
         str(name)
         .strip()
@@ -122,7 +97,7 @@ def _similarity(left: str, right: str) -> float:
 
 
 def guess_column_mapping(columns: Iterable[object]) -> dict[str, str | None]:
-    """Suggest mapping values from uploaded column names without requiring exact names."""
+    """Return detected semantic roles for the provided dataset column names."""
     column_list = [str(col) for col in columns]
     normalized_columns = {str(col): normalize_column_name(col) for col in column_list}
     mapping: dict[str, str | None] = {}
@@ -140,38 +115,10 @@ def guess_column_mapping(columns: Iterable[object]) -> dict[str, str | None]:
             if score > best_score:
                 best_score = score
                 best_column = column
-        mapping[field] = best_column if best_score >= 0.55 else None
-
-    for district_field, city_regency_field in [
-        ("asal", "asal_kota_kabupaten"),
-        ("tujuan", "tujuan_kota_kabupaten"),
-    ]:
-        district_column = mapping.get(district_field)
-        city_regency_column = mapping.get(city_regency_field)
-        if not district_column or district_column != city_regency_column:
-            continue
-
-        normalized_column = normalize_column_name(district_column)
-        if any(token in normalized_column for token in ["kota", "kab", "kabupaten", "city", "regency"]):
-            mapping[district_field] = None
-        elif any(token in normalized_column for token in ["kecamatan", "district"]):
-            mapping[city_regency_field] = None
-
-    if mapping.get("sub_layanan") == mapping.get("layanan"):
-        mapping["sub_layanan"] = None
-        for column, normalized_column in normalized_columns.items():
-            if "sub" in normalized_column and "layanan" in normalized_column:
-                mapping["sub_layanan"] = column
-                break
+        mapping[field] = best_column if best_score >= COLUMN_MAPPING_THRESHOLD else None
 
     directional_pairs = [
         ("asal", "tujuan", ["asal", "origin", "pickup", "jemput"], ["tujuan", "destination", "dropoff", "antar"]),
-        (
-            "asal_kota_kabupaten",
-            "tujuan_kota_kabupaten",
-            ["asal", "origin", "pickup"],
-            ["tujuan", "destination", "dropoff"],
-        ),
         (
             "jumlah_titik_pengambilan",
             "jumlah_titik_pengantaran",
@@ -196,48 +143,57 @@ def guess_column_mapping(columns: Iterable[object]) -> dict[str, str | None]:
     return mapping
 
 
-def build_column_mapping_ui(
-    df: pd.DataFrame,
-    default_mapping: dict[str, str | None],
-    fields: dict[str, str],
-) -> dict[str, str | None]:
-    """Render selectbox mapping controls for all required semantic fields."""
-    options = ["-- Tidak digunakan --"] + [str(col) for col in df.columns]
-    mapping: dict[str, str | None] = {}
-
-    st.caption(
-        "Mapping otomatis hanya sebagai saran awal. User tetap dapat mengganti setiap pilihan secara manual."
-    )
-
-    col_left, col_right = st.columns(2)
-    field_items = list(fields.items())
-    for index, (field_key, label) in enumerate(field_items):
-        container = col_left if index % 2 == 0 else col_right
-        default_column = default_mapping.get(field_key)
-        default_index = options.index(default_column) if default_column in options else 0
-        with container:
-            selected = st.selectbox(
-                label,
-                options,
-                index=default_index,
-                key=f"mapping_{field_key}",
-                help="Pilih kolom dari dataset yang sesuai dengan konsep ini.",
-            )
-        mapping[field_key] = None if selected == "-- Tidak digunakan --" else selected
-
-    return mapping
-
-
 def default_selected_columns(df: pd.DataFrame) -> list[str]:
-    """Use every uploaded column by default so the user can remove what is not needed."""
+    """Return all DataFrame columns as the default active analysis columns."""
     return [str(column) for column in df.columns]
+
+
+def format_column_label(column: object, multiline: bool = False) -> str:
+    """Return a user-facing label for internal/helper column names."""
+    text = str(column)
+    if text in FRIENDLY_COLUMN_LABELS:
+        label = FRIENDLY_COLUMN_LABELS[text]
+    else:
+        label = re.sub(r"^_+", "", text)
+        label = label.replace("_", " ")
+        label = re.sub(r"\s+", " ", label).strip().title()
+
+    if not multiline:
+        return label.replace("\n", " ")
+
+    return _apply_multiline_label(label)
+
+
+def _apply_multiline_label(label: str) -> str:
+    """Insert compact line breaks for long table headers."""
+    if "\n" in label:
+        return label
+    replacements = {
+        "Jumlah Titik Pengambilan": "Jumlah Titik\nPengambilan",
+        "Jumlah Titik Pengantaran": "Jumlah Titik\nPengantaran",
+        "Kategori Titik Pengambilan": "Kategori Titik\nPengambilan",
+        "Kategori Titik Pengantaran": "Kategori Titik\nPengantaran",
+        "Rata-Rata Titik Pengambilan": "Rata-rata Titik\nPengambilan",
+        "Rata-Rata Titik Pengantaran": "Rata-rata Titik\nPengantaran",
+        "Maks Titik Pengambilan": "Maks Titik\nPengambilan",
+        "Maks Titik Pengantaran": "Maks Titik\nPengantaran",
+    }
+    return replacements.get(label, label)
+
+
+def friendly_column_config(df: pd.DataFrame) -> dict[str, st.column_config.Column]:
+    """Return Streamlit column config with readable labels for a DataFrame."""
+    return {
+        str(column): st.column_config.Column(format_column_label(column, multiline=True))
+        for column in df.columns
+    }
 
 
 def build_column_selection_ui(
     df: pd.DataFrame,
     selected_columns: list[str] | None,
 ) -> list[str]:
-    """Render a flexible column picker instead of fixed semantic selectboxes."""
+    """Render the active-column picker and return the selected column names."""
     options = [str(column) for column in df.columns]
     valid_defaults = [column for column in (selected_columns or options) if column in options]
     if not valid_defaults:

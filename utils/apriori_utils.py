@@ -9,6 +9,8 @@ from mlxtend.preprocessing import TransactionEncoder
 
 @dataclass
 class AprioriResult:
+    """Container for encoded transactions, display itemsets, and association rules."""
+
     encoded_transactions: pd.DataFrame
     frequent_itemsets: pd.DataFrame
     rules: pd.DataFrame
@@ -21,6 +23,7 @@ def _format_itemset(value: object) -> str:
 
 
 def _prepare_transactions(transactions: pd.Series) -> list[list[str]]:
+    """Return non-empty transactions with duplicate items removed."""
     cleaned: list[list[str]] = []
     for transaction in transactions.tolist():
         if not isinstance(transaction, list):
@@ -37,7 +40,7 @@ def run_apriori(
     min_confidence: float,
     min_lift: float,
 ) -> AprioriResult:
-    """Run one hot encoding, Apriori, and association rule mining."""
+    """Encode transactions, run Apriori once, and return display-ready results."""
     transaction_list = _prepare_transactions(transactions)
     if not transaction_list:
         return AprioriResult(pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
@@ -46,14 +49,21 @@ def run_apriori(
     encoded_array = encoder.fit(transaction_list).transform(transaction_list)
     encoded_df = pd.DataFrame(encoded_array, columns=encoder.columns_)
 
-    frequent_itemsets = apriori(
+    frequent_itemsets_raw = apriori(
         encoded_df,
         min_support=min_support,
         use_colnames=True,
     )
-    if frequent_itemsets.empty:
-        return AprioriResult(encoded_df, frequent_itemsets, pd.DataFrame())
+    if frequent_itemsets_raw.empty:
+        return AprioriResult(encoded_df, frequent_itemsets_raw, pd.DataFrame())
 
+    rules = association_rules(
+        frequent_itemsets_raw,
+        metric="confidence",
+        min_threshold=min_confidence,
+    )
+
+    frequent_itemsets = frequent_itemsets_raw.copy()
     frequent_itemsets = frequent_itemsets.sort_values(
         ["support"],
         ascending=False,
@@ -61,12 +71,6 @@ def run_apriori(
     frequent_itemsets["jumlah_item"] = frequent_itemsets["itemsets"].map(len)
     frequent_itemsets["itemsets"] = frequent_itemsets["itemsets"].map(_format_itemset)
 
-    raw_itemsets = apriori(
-        encoded_df,
-        min_support=min_support,
-        use_colnames=True,
-    )
-    rules = association_rules(raw_itemsets, metric="confidence", min_threshold=min_confidence)
     if rules.empty:
         return AprioriResult(encoded_df, frequent_itemsets, pd.DataFrame())
 

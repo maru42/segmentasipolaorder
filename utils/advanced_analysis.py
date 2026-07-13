@@ -6,11 +6,14 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from utils.mapping import format_column_label, friendly_column_config
 from utils.visualizations import PLOT_TEMPLATE, bar_chart, value_count_frame
 
 
 CASHLESS_PATTERN = re.compile(r"non\s*tunai|nontunai|cashless|e-?wallet|gopay|ovo|dana|qris|saldo", re.IGNORECASE)
 CASH_PATTERN = re.compile(r"tunai|cash|cod", re.IGNORECASE)
+DEFAULT_CROSSTAB_TOP_ROWS = 12
+TOP_HISTORICAL_PATTERN_LIMIT = 15
 GROUPED_ORDER_VALUES = {
     "multi instant",
     "same day",
@@ -37,7 +40,7 @@ def _safe_crosstab(
     df: pd.DataFrame,
     row_column: str,
     column_column: str,
-    top_rows: int = 12,
+    top_rows: int = DEFAULT_CROSSTAB_TOP_ROWS,
 ) -> pd.DataFrame:
     data = df[[row_column, column_column]].dropna().astype(str)
     if data.empty:
@@ -89,6 +92,11 @@ def _render_stacked_bar(
         title=title,
         template=PLOT_TEMPLATE,
         barmode="stack",
+        labels={
+            x: format_column_label(x),
+            "jumlah": "Jumlah",
+            color: format_column_label(color),
+        },
     )
     fig.update_layout(margin=dict(l=10, r=10, t=55, b=10), yaxis_title="Jumlah order")
     st.plotly_chart(fig, use_container_width=True)
@@ -116,12 +124,17 @@ def _render_point_distribution(df: pd.DataFrame, column: str, title: str) -> Non
         template=PLOT_TEMPLATE,
         color="jumlah_order",
         color_continuous_scale="Teal",
+        labels={
+            "jumlah_titik": "Jumlah Titik",
+            "jumlah_order": "Jumlah Order",
+        },
     )
     fig.update_layout(margin=dict(l=10, r=10, t=55, b=10), xaxis_title="Jumlah titik")
     st.plotly_chart(fig, use_container_width=True)
 
 
 def normalize_payment_group(value: object) -> str:
+    """Return the normalized payment group for a raw payment value."""
     if pd.isna(value):
         return "Tidak Diketahui"
     text = str(value).strip()
@@ -133,6 +146,7 @@ def normalize_payment_group(value: object) -> str:
 
 
 def derive_grouped_status(series: pd.Series) -> pd.Series:
+    """Return grouped-order labels derived from a service/category Series."""
     def classify(value: object) -> str:
         if pd.isna(value):
             return "Non Grouped/Single"
@@ -149,8 +163,8 @@ def derive_grouped_status(series: pd.Series) -> pd.Series:
 
 
 def render_relationship_patterns(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
+    """Render available relationship heatmaps and return whether any chart was shown."""
     service_column = _selected_column(mapping, "layanan")
-    sub_service_column = _selected_column(mapping, "sub_layanan")
     payment_column = _selected_column(mapping, "pembayaran")
     origin_column = _location_column(df, _selected_column(mapping, "asal"), "_lokasi_asal")
     destination_column = _location_column(df, _selected_column(mapping, "tujuan"), "_lokasi_tujuan")
@@ -192,26 +206,6 @@ def render_relationship_patterns(df: pd.DataFrame, mapping: dict[str, str | None
                 "Lokasi tujuan",
             )
         )
-    if sub_service_column and sub_service_column in df.columns:
-        if "_kategori_waktu" in df.columns:
-            analyses.append(
-                (
-                    _safe_crosstab(df, "_kategori_waktu", sub_service_column),
-                    "Hubungan Kategori Waktu dan Sub Layanan",
-                    "Sub layanan",
-                    "Kategori waktu",
-                )
-            )
-        if payment_column and payment_column in df.columns:
-            analyses.append(
-                (
-                    _safe_crosstab(df, payment_column, sub_service_column),
-                    "Hubungan Pembayaran dan Sub Layanan",
-                    "Sub layanan",
-                    "Pembayaran",
-                )
-            )
-
     if not analyses:
         return False
 
@@ -225,7 +219,8 @@ def render_relationship_patterns(df: pd.DataFrame, mapping: dict[str, str | None
 
 
 def render_grouped_order_analysis(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
-    group_column = _selected_column(mapping, "sub_layanan")
+    """Render grouped-order analysis from the mapped service column."""
+    group_column = _selected_column(mapping, "layanan")
     if not group_column or group_column not in df.columns:
         return False
 
@@ -245,7 +240,7 @@ def render_grouped_order_analysis(df: pd.DataFrame, mapping: dict[str, str | Non
         )
     with col2:
         st.plotly_chart(
-            bar_chart(raw_counts, group_column, "jumlah", "Distribusi Sub Layanan"),
+            bar_chart(raw_counts, group_column, "jumlah", "Distribusi Layanan"),
             use_container_width=True,
         )
 
@@ -261,9 +256,10 @@ def render_grouped_order_analysis(df: pd.DataFrame, mapping: dict[str, str | Non
 
 
 def render_point_count_analysis(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
+    """Render pickup/dropoff point-count analysis when point columns are mapped."""
     pickup_column = _selected_column(mapping, "jumlah_titik_pengambilan")
     dropoff_column = _selected_column(mapping, "jumlah_titik_pengantaran")
-    sub_service_column = _selected_column(mapping, "sub_layanan")
+    service_column = _selected_column(mapping, "layanan")
 
     has_pickup = pickup_column and pickup_column in df.columns
     has_dropoff = dropoff_column and dropoff_column in df.columns
@@ -288,14 +284,14 @@ def render_point_count_analysis(df: pd.DataFrame, mapping: dict[str, str | None]
         if has_dropoff:
             _render_point_distribution(df, dropoff_column, "Distribusi Jumlah Titik Pengantaran")
 
-    if sub_service_column and sub_service_column in df.columns:
-        summary_fields = [sub_service_column]
+    if service_column and service_column in df.columns:
+        summary_fields = [service_column]
         if has_pickup:
             summary_fields.append(pickup_column)
         if has_dropoff:
             summary_fields.append(dropoff_column)
         point_summary = df[summary_fields].copy()
-        agg_spec: dict[str, tuple[str, str]] = {"jumlah_transaksi": (sub_service_column, "count")}
+        agg_spec: dict[str, tuple[str, str]] = {"jumlah_transaksi": (service_column, "count")}
         if has_pickup:
             agg_spec["rata_rata_titik_pengambilan"] = (pickup_column, "mean")
             agg_spec["maks_titik_pengambilan"] = (pickup_column, "max")
@@ -303,16 +299,22 @@ def render_point_count_analysis(df: pd.DataFrame, mapping: dict[str, str | None]
             agg_spec["rata_rata_titik_pengantaran"] = (dropoff_column, "mean")
             agg_spec["maks_titik_pengantaran"] = (dropoff_column, "max")
         point_summary = (
-            point_summary.groupby(sub_service_column)
+            point_summary.groupby(service_column)
             .agg(**agg_spec)
             .sort_values("jumlah_transaksi", ascending=False)
             .reset_index()
         )
-        st.dataframe(point_summary, use_container_width=True, hide_index=True)
+        st.dataframe(
+            point_summary,
+            use_container_width=True,
+            hide_index=True,
+            column_config=friendly_column_config(point_summary),
+        )
     return True
 
 
 def render_ramadan_comparison(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
+    """Render Ramadan versus post-Ramadan comparison when date data is available."""
     if "_periode_ramadan_2026" not in df.columns or "_tanggal_filter" not in df.columns:
         return False
 
@@ -347,9 +349,9 @@ def render_ramadan_comparison(df: pd.DataFrame, mapping: dict[str, str | None]) 
 
 
 def render_payment_tendency(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
+    """Render cash versus cashless tendency analysis from the mapped payment column."""
     payment_column = _selected_column(mapping, "pembayaran")
     service_column = _selected_column(mapping, "layanan")
-    sub_service_column = _selected_column(mapping, "sub_layanan")
     if not payment_column or payment_column not in df.columns:
         return False
 
@@ -367,7 +369,12 @@ def render_payment_tendency(df: pd.DataFrame, mapping: dict[str, str | None]) ->
             use_container_width=True,
         )
     with col2:
-        st.dataframe(payment_counts, use_container_width=True, hide_index=True)
+        st.dataframe(
+            payment_counts,
+            use_container_width=True,
+            hide_index=True,
+            column_config=friendly_column_config(payment_counts),
+        )
 
     if service_column and service_column in data.columns:
         _render_stacked_bar(
@@ -376,19 +383,12 @@ def render_payment_tendency(df: pd.DataFrame, mapping: dict[str, str | None]) ->
             "_kelompok_pembayaran",
             "Hubungan Pembayaran Tunai/NonTunai dengan Layanan",
         )
-    if sub_service_column and sub_service_column in data.columns:
-        _render_stacked_bar(
-            data[[sub_service_column, "_kelompok_pembayaran"]],
-            sub_service_column,
-            "_kelompok_pembayaran",
-            "Hubungan Pembayaran Tunai/NonTunai dengan Sub Layanan",
-        )
     return True
 
 
 def render_personal_history_patterns(df: pd.DataFrame, mapping: dict[str, str | None]) -> bool:
+    """Render top historical transaction patterns from available mapped columns."""
     service_column = _selected_column(mapping, "layanan")
-    sub_service_column = _selected_column(mapping, "sub_layanan")
     payment_column = _selected_column(mapping, "pembayaran")
     origin_column = _location_column(df, _selected_column(mapping, "asal"), "_lokasi_asal")
     destination_column = _location_column(df, _selected_column(mapping, "tujuan"), "_lokasi_tujuan")
@@ -400,7 +400,6 @@ def render_personal_history_patterns(df: pd.DataFrame, mapping: dict[str, str | 
         for column in [
             "_kategori_waktu",
             service_column,
-            sub_service_column,
             payment_column,
             origin_column,
             destination_column,
@@ -424,7 +423,7 @@ def render_personal_history_patterns(df: pd.DataFrame, mapping: dict[str, str | 
     pattern_counts = (
         data["_pola_transaksi"]
         .value_counts()
-        .head(15)
+        .head(TOP_HISTORICAL_PATTERN_LIMIT)
         .rename_axis("pola_transaksi")
         .reset_index(name="jumlah")
     )
@@ -450,6 +449,10 @@ def render_personal_history_patterns(df: pd.DataFrame, mapping: dict[str, str | 
             template=PLOT_TEMPLATE,
             color="jumlah",
             color_continuous_scale="Teal",
+            labels={
+                "jumlah": "Jumlah",
+                "pola_transaksi": "Pola Transaksi",
+            },
         )
         fig.update_layout(margin=dict(l=10, r=10, t=55, b=10), yaxis_title="")
         st.plotly_chart(fig, use_container_width=True)
@@ -458,11 +461,17 @@ def render_personal_history_patterns(df: pd.DataFrame, mapping: dict[str, str | 
         metric_cols[0].metric("Total transaksi", f"{len(df):,}".replace(",", "."))
         metric_cols[1].metric("Rata-rata tarif", "-" if pd.isna(avg_tariff) else f"{avg_tariff:,.0f}")
         metric_cols[2].metric("Rata-rata jarak", "-" if pd.isna(avg_distance) else f"{avg_distance:,.2f}")
-        st.dataframe(pattern_counts, use_container_width=True, hide_index=True)
+        st.dataframe(
+            pattern_counts,
+            use_container_width=True,
+            hide_index=True,
+            column_config=friendly_column_config(pattern_counts),
+        )
     return True
 
 
 def render_advanced_pattern_analysis(df: pd.DataFrame, mapping: dict[str, str | None]) -> None:
+    """Render every advanced analysis section supported by the current mapped columns."""
     st.caption(
         "Analisis ini memakai kolom yang dipilih dan peran kolom yang terdeteksi otomatis. "
         "Jika sebuah insight belum muncul, pilih kolom yang relevan terlebih dahulu."
